@@ -1,0 +1,8 @@
+[language-server.hanumail-local]
+command = "cargo"
+args = ["run", "-q"]
+
+[[language]]
+name = "mail"
+file-types = [ { glob = "email-*" } ]
+language-servers = [ "hanumail-local" ]
