@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use tokio::sync::Mutex;
 use tower_lsp::{
-    Client, LanguageServer, LspService, Server,
     jsonrpc::Result,
     lsp_types::{
         DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
@@ -10,6 +9,7 @@ use tower_lsp::{
         InitializeResult, InitializedParams, MessageType, OneOf, ServerCapabilities, ServerInfo,
         TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
     },
+    Client, LanguageServer, LspService, Server,
 };
 
 #[derive(Debug)]
@@ -139,69 +139,58 @@ fn reformat(input: &[&str]) -> String {
     let mut acc = String::new();
     let mut curlevel = None;
     for (level, part) in input {
-        // eprintln!("RET: {ret:?}");
-        // eprintln!("HAVE: {acc:?} {curlevel:?}");
-        // eprintln!("GOT: {level} {part}");
-        if curlevel.is_none() {
-            curlevel = Some(level);
-            acc = part;
+        let part = part.trim();
+        if part.is_empty() {
+            // Something already present, wrap that into the output
+            if let Some(curlevel) = curlevel {
+                do_wrap(&mut ret, &acc, curlevel);
+            }
+            curlevel = None;
+            // Blank line
+            do_wrap(&mut ret, "", level);
             continue;
         }
-        if curlevel == Some(level) {
-            acc.push(' ');
-            acc.push_str(&part);
-            continue;
+        match curlevel {
+            None => {
+                curlevel = Some(level);
+                acc = part.to_string();
+            }
+            Some(cl) if cl == level => {
+                acc.push(' ');
+                acc.push_str(part);
+            }
+            Some(ol) => {
+                do_wrap(&mut ret, &acc, ol);
+                curlevel = Some(level);
+                acc = part.to_string();
+            }
         }
-        do_wrap(&mut ret, &acc, curlevel);
-        if curlevel == Some(0) || level == 0 {
-            ret.push('\n');
-        }
-        curlevel = Some(level);
-        acc = part.to_string();
     }
 
-    // eprintln!("{acc:?} {curlevel:?}");
-    if !acc.is_empty() {
-        do_wrap(&mut ret, &acc, curlevel)
+    if let Some(level) = curlevel {
+        do_wrap(&mut ret, &acc, level);
     }
 
     ret
 }
 
-fn do_wrap(ret: &mut String, acc: &String, curlevel: Option<usize>) {
-    fn push_level(acc: &mut String, level: usize) {
-        for _ in 0..level {
-            acc.push('>');
-            acc.push(' ');
-        }
-    }
-    fn space(level: usize) -> usize {
-        78 - (level * 2)
-    }
-    let mut lineacc = String::new();
-    // eprintln!("Wrapping {acc:?} at level {curlevel:?}");
-    for word in acc
-        .trim()
-        .split_ascii_whitespace()
-        .skip_while(|s| s.is_empty())
-    {
-        lineacc = lineacc.trim().into();
-        if lineacc.len() + word.len() + 1 > space(curlevel.unwrap()) {
-            push_level(ret, curlevel.unwrap());
-            ret.push_str(&lineacc);
+fn do_wrap(ret: &mut String, acc: &str, curlevel: usize) {
+    let level_str = std::iter::repeat("> ").take(curlevel).collect::<String>();
+    const LINE_LENGTH: usize = 78;
+
+    let mut lineacc = level_str.clone();
+    for word in acc.trim().split_ascii_whitespace() {
+        if lineacc.len() + word.len() > LINE_LENGTH && lineacc.len() > level_str.len() {
+            ret.push_str(lineacc.trim());
             ret.push('\n');
-            lineacc = word.into();
-        } else {
-            lineacc.push(' ');
-            lineacc.push_str(word);
+            lineacc = level_str.clone();
         }
+        lineacc.push_str(word);
+        lineacc.push(' ');
     }
-    if !lineacc.is_empty() {
-        lineacc = lineacc.trim().into();
-        push_level(ret, curlevel.unwrap());
-        ret.push_str(&lineacc);
-        ret.push('\n');
-    }
+
+    ret.push_str(lineacc.trim());
+    ret.push('\n');
 }
 
 impl Backend {
