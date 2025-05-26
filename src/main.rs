@@ -119,7 +119,7 @@ impl LanguageServer for Backend {
 // at the same level, and replace things to look neat
 fn reformat(input: &[&str]) -> String {
     let input = input
-        .into_iter()
+        .iter()
         .map(|l| {
             let level = l
                 .chars()
@@ -175,7 +175,7 @@ fn reformat(input: &[&str]) -> String {
 }
 
 fn do_wrap(ret: &mut String, acc: &str, curlevel: usize) {
-    let level_str = std::iter::repeat("> ").take(curlevel).collect::<String>();
+    let level_str = "> ".repeat(curlevel);
     const LINE_LENGTH: usize = 78;
 
     let mut lineacc = level_str.clone();
@@ -207,7 +207,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend::new(client));
+    let (service, socket) = LspService::new(Backend::new);
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }
