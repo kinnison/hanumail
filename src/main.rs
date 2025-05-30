@@ -6,8 +6,9 @@ use tower_lsp::{
     lsp_types::{
         DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
         DocumentFormattingParams, DocumentRangeFormattingParams, InitializeParams,
-        InitializeResult, InitializedParams, MessageType, OneOf, ServerCapabilities, ServerInfo,
-        TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
+        InitializeResult, InitializedParams, MessageType, OneOf, Position, Range,
+        ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
+        Url,
     },
     Client, LanguageServer, LspService, Server,
 };
@@ -66,8 +67,27 @@ impl LanguageServer for Backend {
         docs.remove(&params.text_document.uri);
     }
 
-    async fn formatting(&self, _params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        Ok(None)
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let mut docs = self.documents.lock().await;
+        let doc = docs.entry(params.text_document.uri.clone()).or_default();
+
+        let whole_doc = Range::new(
+            Position {
+                line: 0,
+                character: 0,
+            },
+            Position {
+                line: doc.lines().count() as u32,
+                character: 0,
+            },
+        );
+
+        let new_doc = reformat_entire_doc(doc);
+
+        Ok(Some(vec![TextEdit {
+            range: whole_doc,
+            new_text: new_doc,
+        }]))
     }
 
     async fn range_formatting(
@@ -191,6 +211,45 @@ fn do_wrap(ret: &mut String, acc: &str, curlevel: usize) {
 
     ret.push_str(lineacc.trim());
     ret.push('\n');
+}
+
+fn reformat_entire_doc(body_s: &str) -> String {
+    enum ParseState {
+        Header,
+        Body,
+        Signature,
+    }
+    use ParseState::*;
+    let mut header = vec![];
+    let mut body = vec![];
+    let mut sig = vec![];
+
+    let mut state = Header;
+    for line in body_s.lines() {
+        match state {
+            Header => {
+                header.push(line);
+                if line.is_empty() {
+                    state = Body;
+                }
+            }
+            Body => {
+                if line == "--" || line == "-- " {
+                    state = Signature;
+                    sig.push(line);
+                } else {
+                    body.push(line);
+                }
+            }
+            Signature => {
+                sig.push(line);
+            }
+        }
+    }
+    let new_body = reformat(&body);
+    let header = header.join("\n");
+    let sig = sig.join("\n");
+    format!("{header}\n{new_body}{sig}\n")
 }
 
 impl Backend {
